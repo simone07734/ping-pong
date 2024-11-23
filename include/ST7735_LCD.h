@@ -55,7 +55,7 @@ void ST7735_init() {
     _delay_ms(200);
     Send_Command(MADCTL);
     _delay_ms(200);
-    Send_Data(0b11101000); // turns the screen "sideways" to match game view
+    Send_Data(0b00001000); // screen color and orientation settings
 }
 
 /* 
@@ -63,7 +63,7 @@ Inputs: xs (x start), xe (x end), ys (y start), ye (y end), color (16 bits)
 Fill in the entire rectangle with the color
 */
 void displayBlock(char xs, char xe, char ys, char ye, short color) {
-    int i, j;
+    unsigned int i, j;
 
     // set location of block
     Send_Command(CASET);
@@ -81,10 +81,11 @@ void displayBlock(char xs, char xe, char ys, char ye, short color) {
     Send_Command(RAMWR);
     for (i = 0; i <= uint16_t(xe - xs); i++) {
         for (j = 0; j <= uint16_t(ye - ys); j++) {
-            Send_Data((color & 0xF0) >> 8);
-            Send_Data(color & 0x0F);
+            Send_Data((color & 0xFF00) >> 8);
+            Send_Data(color & 0x00FF);
         }
     }
+    return;
 }
 
 /* TODO: displayBitmap
