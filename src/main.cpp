@@ -49,6 +49,7 @@ int Tick_Ball(int);
 
 // Helper function declaration
 int checkCollision(void);
+void moveBall(void);
 
 void TimerISR() {
     for ( unsigned int i = 0; i < NUM_TASKS; i++ ) { // Iterate through each task in the task array
@@ -182,8 +183,6 @@ int Tick_Player2(int state) {
 }
 
 int Tick_Ball(int state) {
-    static unsigned char newX;
-    static unsigned char newY;
     switch (state) { // Transitions
         case B_INIT:
             if (screenClear) { state = B_PLAY; }
@@ -196,25 +195,8 @@ int Tick_Ball(int state) {
     }
     switch (state) { // Actions
         case B_PLAY:
-
-            checkCollision();
-            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
-            
-            // TODO: move into helper function
-            newX = ballLoc[0] + ballVec[0]; // get new ball xs
-            newY = ballLoc[2] + ballVec[1]; // get new ball ys
-
-            if(newX <= 0) {newX = 0;}
-            if(newX >= 128) {newX = 128;}
-            if(newY <= 0) {newY = 0;}
-            if(newY >= 128) {newY = 128;}
-
-            ballLoc[0] = newX;
-            ballLoc[1] = newX + BALL_DIAMETER;
-            ballLoc[2] = newY;
-            ballLoc[3] = newY + BALL_DIAMETER;
-            
-            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR); // display paddle at new location
+            checkCollision(); // TODO: check the return value and the game responds accordingly
+            moveBall();            
             break;
         default:
             break;
@@ -223,8 +205,33 @@ int Tick_Ball(int state) {
 }
 
 // Helper functions
+
+/* Moves the ball according to ballVec*/
+void moveBall(void) {
+    unsigned char newX;
+    unsigned char newY;
+
+    displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
+    
+    newX = ballLoc[0] + ballVec[0]; // get new ball xs
+    newY = ballLoc[2] + ballVec[1]; // get new ball ys
+
+    // keep ball within bounds of screen
+    if(newX <= 0) {newX = 0;}
+    if(newX >= 128) {newX = 128;}
+    if(newY <= 0) {newY = 0;}
+    if(newY >= 128) {newY = 128;}
+
+    // record new location of ball
+    ballLoc[0] = newX;
+    ballLoc[1] = newX + BALL_DIAMETER;
+    ballLoc[2] = newY;
+    ballLoc[3] = newY + BALL_DIAMETER;
+
+    displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR); // display ball at new location
+}
+
 /* Checks whether the ball has collided with the walls or paddles, and changes it's vector accordingly.
-   Should be called before clearing the old ball from the display. 
    Returns 1 when player 1 scores, 2 when player 2 scores, and 0 when nobody scores. */
 int checkCollision(void) {
     // side walls
@@ -274,6 +281,7 @@ int checkCollision(void) {
 
     // behind paddle 1
     if (ballLoc[0] <= 4) {
+        displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
         ballLoc[0] = 50;
         ballLoc[1] = 54;
         ballLoc[2] = 50;
@@ -283,6 +291,7 @@ int checkCollision(void) {
 
     // behind paddle 2
     if (ballLoc[1] >= 125) {
+        displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
         ballLoc[0] = 50;
         ballLoc[1] = 54;
         ballLoc[2] = 50;
