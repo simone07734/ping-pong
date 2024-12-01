@@ -40,6 +40,9 @@ void outNum(int num){
 }
 
 long map(long x, long in_min, long in_max, long out_min, long out_max) {
-    return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    long val = (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
+    if (val > out_max) { val = out_max; }
+    if (val < out_min) { val = out_min; }
+    return val;
 }
 #endif /* HEPLER_H */

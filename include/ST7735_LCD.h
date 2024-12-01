@@ -62,7 +62,7 @@ void ST7735_init() {
 Inputs: xs (x start), xe (x end), ys (y start), ye (y end), color (16 bits)
 Fill in the entire rectangle with the color
 */
-void displayBlock(char xs, char xe, char ys, char ye, short color) {
+void displayBlock(unsigned char xs, unsigned char xe, unsigned char ys, unsigned char ye, short color) {
     unsigned int i, j;
 
     // set location of block
