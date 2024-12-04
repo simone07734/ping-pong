@@ -4,7 +4,7 @@
 #include "SPI_AVR.h"
 #include "timerISR.h"
 
-#define NUM_TASKS 4
+#define NUM_TASKS 6
 
 // Game constants
 const char PADDLE_WIDTH = 26;
@@ -18,7 +18,8 @@ unsigned char player1Loc[4] = {10, 10 + PADDLE_DEPTH, 52, 52 + PADDLE_WIDTH}; //
 unsigned char player2Loc[4] = {119 - PADDLE_DEPTH, 119, 52, 52 + PADDLE_WIDTH}; 
 unsigned char ballLoc[4] = {62, 62 + BALL_DIAMETER, 62, 62 + BALL_DIAMETER}; // in order: xs, xe, ys, ye
 signed char ballVec[2] = {2,2}; // in order:x, y
-unsigned char screenClear = 0;
+unsigned char gameStatus = 0; // 1 for game in progress, 0 otherwise
+unsigned char numPlayers = 2; // can be 1 or 2 players
 
 // Task struct for concurrent synchSMs implmentations
 typedef struct _task{
@@ -30,7 +31,9 @@ typedef struct _task{
 
 // Task periods and GCD
 const unsigned long GCD_PERIOD = 25;
-const unsigned long START_GAME_PERIOD = 500;
+const unsigned long GAME_MANAGER_PERIOD = 100;
+const unsigned long START_RESET_BUTTON_PERIOD = 200;
+const unsigned long PLAYER_TOGGLE_BUTTON_PERIOD = 200;
 const unsigned long PLAYER1_PERIOD = 25;
 const unsigned long PLAYER2_PERIOD = 25;
 const unsigned long BALL_PERIOD = 25;
@@ -38,11 +41,15 @@ const unsigned long BALL_PERIOD = 25;
 task tasks[NUM_TASKS]; // task array
 
 // Task functions and states declaration
-enum StartGame { SG_INIT, SG_PLAY };
+enum GameManager { GM_INIT, GM_PLAY, GM_POINT };
+enum StartResetButton { SR_RESET, SR_PRESS_START, SR_START, SR_PRESS_RESET };
+enum PlayerToggleButton { PT_TWO, PT_PRESS_ONE, PT_ONE, PT_PRESS_TWO };
 enum Player1 { P1_INIT, P1_MOVE };
-enum Player2 { P2_INIT, P2_MOVE };
-enum Ball { B_INIT, B_PLAY };
-int Tick_Start_Game(int);
+enum Player2 { P2_INIT, P2_MOVE, P2_AUTO };
+enum Ball { B_INIT, B_WAIT, B_PLAY };
+int Tick_Game_Manager(int);
+int Tick_Start_Reset(int);
+int Tick_Player_Toggle(int);
 int Tick_Player1(int);
 int Tick_Player2(int);
 int Tick_Ball(int);
@@ -50,6 +57,7 @@ int Tick_Ball(int);
 // Helper function declaration
 int checkCollision(void);
 void moveBall(void);
+void autonomousPlayer2(void);
 
 void TimerISR() {
     for ( unsigned int i = 0; i < NUM_TASKS; i++ ) { // Iterate through each task in the task array
@@ -75,10 +83,20 @@ int main() {
     unsigned char i = 0;
 
     // initialize tasks
-    tasks[i].state = SG_INIT;
-    tasks[i].period = START_GAME_PERIOD;
+    tasks[i].state = GM_INIT;
+    tasks[i].period = GAME_MANAGER_PERIOD;
     tasks[i].elapsedTime = tasks[i].period;
-    tasks[i].TickFct = &Tick_Start_Game;
+    tasks[i].TickFct = &Tick_Game_Manager;
+    i++;
+    tasks[i].state = SR_RESET;
+    tasks[i].period = START_RESET_BUTTON_PERIOD;
+    tasks[i].elapsedTime = tasks[i].period;
+    tasks[i].TickFct = &Tick_Start_Reset;
+    i++;
+    tasks[i].state = PT_TWO;
+    tasks[i].period = PLAYER_TOGGLE_BUTTON_PERIOD;
+    tasks[i].elapsedTime = tasks[i].period;
+    tasks[i].TickFct = &Tick_Player_Toggle;
     i++;
     tasks[i].state = P1_INIT;
     tasks[i].period = PLAYER1_PERIOD;
@@ -103,24 +121,87 @@ int main() {
 
 // Task function definitions
 
-int Tick_Start_Game(int state) {
+int Tick_Game_Manager(int state) {
     switch (state) { // Transitions
-        case SG_INIT:
+        case GM_INIT:
+            if (gameStatus) {
+                state = GM_PLAY;
+            }
             break;
-        case SG_PLAY:
+        case GM_PLAY:
+            break;
+        case GM_POINT:
             break;
         default:
-            state = SG_INIT;
+            state = GM_INIT;
             break;
     }
     switch (state) { // Actions
-        case SG_INIT:
-            // TODO: fix bug where it freezes when setting the whole screen
+        case GM_INIT:
             displayBlock(0, 129, 0, 129, BACKGROUND_COLOR); // initialize empty board
-            screenClear = 1;
-            state = SG_PLAY;
             break;
         default:
+            break;
+    }
+    return state;
+}
+
+int Tick_Start_Reset(int state) {
+    switch(state) { // Transitions
+        case SR_RESET:
+            if (GetBit(PINC, 3)) {
+                state = SR_PRESS_START;
+            }
+            break;
+        case SR_PRESS_START:
+            if (!GetBit(PINC, 3)) {
+                state = SR_START;
+                gameStatus = 1;
+            }
+            break;
+        case SR_START:
+            if (GetBit(PINC, 3)) {
+                state = SR_PRESS_RESET;
+            }
+            break;
+        case SR_PRESS_RESET:
+            if (!GetBit(PINC, 3)) {
+                state = SR_RESET;
+                gameStatus = 0;
+            }
+            break;
+        default:
+            break;
+    }
+    return state;
+}
+
+int Tick_Player_Toggle(int state) {
+    switch(state) { // Transitions
+        case PT_TWO:
+            if (!gameStatus && GetBit(PINC, 4)) {
+                state = PT_PRESS_ONE;
+            }
+            break;
+        case PT_PRESS_ONE:
+            if (!gameStatus && !GetBit(PINC, 4)) {
+                state = PT_ONE;
+                numPlayers = 1;
+            }
+            break;
+        case PT_ONE:
+            if (!gameStatus && GetBit(PINC, 4)) {
+                state = PT_PRESS_TWO;
+            }
+            break;
+        case PT_PRESS_TWO:
+            if (!gameStatus && !GetBit(PINC, 4)) {
+                state = PT_TWO;
+                numPlayers = 2;
+            }
+            break;
+        default:
+            state = PT_TWO;
             break;
     }
     return state;
@@ -130,15 +211,23 @@ int Tick_Player1(int state) {
     static unsigned char newLoc;
     switch (state) { // Transitions
         case P1_INIT:
-            if (screenClear) { state = P1_MOVE; }
+            if (gameStatus) {
+                state = P1_MOVE;
+            } 
             break;
         case P1_MOVE:
+            if (!gameStatus) {
+                state = P1_INIT;
+            }
             break;
         default:
             state = P1_INIT;
             break;
     }
     switch (state) { // Actions
+        case P1_INIT:
+            displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear paddle
+            break;
         case P1_MOVE:
             displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear previous paddle
             newLoc = map(ADC_read(1), 40, 1024, 0, 102); // get new paddle location
@@ -158,15 +247,33 @@ int Tick_Player2(int state) {
     static unsigned char newLoc;
     switch (state) { // Transitions
         case P2_INIT:
-            if (screenClear) { state = P2_MOVE; }
+            if (gameStatus) {
+                if (numPlayers == 2) {
+                    state = P2_MOVE;
+                }
+                else {
+                    state = P2_AUTO;
+                }
+            }
             break;
         case P2_MOVE:
+            if (!gameStatus) {
+                state = P2_INIT;
+            }
+            break;
+        case P2_AUTO:
+            if (!gameStatus) {
+                state = P2_INIT;
+            }
             break;
         default:
             state = P2_INIT;
             break;
     }
     switch (state) { // Actions
+        case P2_INIT:
+            displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], BACKGROUND_COLOR); // clear paddle
+            break;
         case P2_MOVE:
             displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], BACKGROUND_COLOR); // clear previous paddle
             newLoc = map(ADC_read(2), 40, 1024, 0, 102); // get new paddle location
@@ -176,6 +283,8 @@ int Tick_Player2(int state) {
             player2Loc[3] = newLoc + PADDLE_WIDTH;
             displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], OBJECT_COLOR); // display paddle at new location
             break;
+        case P2_AUTO:
+            autonomousPlayer2();
         default:
             break;
     }   
@@ -185,15 +294,28 @@ int Tick_Player2(int state) {
 int Tick_Ball(int state) {
     switch (state) { // Transitions
         case B_INIT:
-            if (screenClear) { state = B_PLAY; }
+            if (gameStatus) {
+                state = B_PLAY;
+            }
             break;
         case B_PLAY:
+            if (!gameStatus) {
+                state = B_INIT;
+                displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
+            }
             break;
         default:
             state = B_INIT;
             break;
     }
     switch (state) { // Actions
+        case B_INIT:
+            ballLoc[0] = 62;
+            ballLoc[1] = 62 + BALL_DIAMETER;
+            ballLoc[2] = 62;
+            ballLoc[3] = 62 + BALL_DIAMETER;
+            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR);
+            break;
         case B_PLAY:
             checkCollision(); // TODO: check the return value and the game responds accordingly
             moveBall();            
@@ -211,7 +333,7 @@ void moveBall(void) {
     unsigned char newX;
     unsigned char newY;
 
-    displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
+    displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous ball
     
     newX = ballLoc[0] + ballVec[0]; // get new ball xs
     newY = ballLoc[2] + ballVec[1]; // get new ball ys
@@ -282,22 +404,36 @@ int checkCollision(void) {
     // behind paddle 1
     if (ballLoc[0] <= 4) {
         displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
-        ballLoc[0] = 50;
-        ballLoc[1] = 54;
-        ballLoc[2] = 50;
-        ballLoc[3] = 54;
+        ballLoc[0] = 62;
+        ballLoc[1] = 62 + BALL_DIAMETER;
+        ballLoc[2] = 62;
+        ballLoc[3] = 62 + BALL_DIAMETER;
         return 2; // player 2 gets a point
     }
 
     // behind paddle 2
     if (ballLoc[1] >= 125) {
         displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
-        ballLoc[0] = 50;
-        ballLoc[1] = 54;
-        ballLoc[2] = 50;
-        ballLoc[3] = 54;
+        ballLoc[0] = 62;
+        ballLoc[1] = 62 + BALL_DIAMETER;
+        ballLoc[2] = 62;
+        ballLoc[3] = 62 + BALL_DIAMETER;
         return 1; // player 1 gets a point
     }
     
     return 0; // no points awarded
+}
+
+/* Moves paddle 2 autonomously towards the ball for 1 player games. */
+void autonomousPlayer2(void) {
+    displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], BACKGROUND_COLOR);  // clear previous paddle
+    if (ballLoc[2] <= player2Loc[2]) {
+        player2Loc[2] -= 1;
+        player2Loc[3] -= 1;
+    }
+    else if (ballLoc[3] >= player2Loc[3]) {
+        player2Loc[2] += 1;
+        player2Loc[3] += 1;
+    }
+    displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], OBJECT_COLOR); // display new paddle
 }
