@@ -20,6 +20,9 @@ unsigned char ballLoc[4] = {62, 62 + BALL_DIAMETER, 62, 62 + BALL_DIAMETER}; // 
 signed char ballVec[2] = {2,2}; // in order:x, y
 unsigned char gameStatus = 0; // 1 for game in progress, 0 otherwise
 unsigned char numPlayers = 2; // can be 1 or 2 players
+unsigned char pointScored = 0; // 1 for point scored by player 1, 2 for point scored by player 2
+unsigned char player1Score = 0;
+unsigned char plyaer2Score = 0;
 
 // Task struct for concurrent synchSMs implmentations
 typedef struct _task{
@@ -46,7 +49,7 @@ enum StartResetButton { SR_RESET, SR_PRESS_START, SR_START, SR_PRESS_RESET };
 enum PlayerToggleButton { PT_TWO, PT_PRESS_ONE, PT_ONE, PT_PRESS_TWO };
 enum Player1 { P1_INIT, P1_MOVE };
 enum Player2 { P2_INIT, P2_MOVE, P2_AUTO };
-enum Ball { B_INIT, B_WAIT, B_PLAY };
+enum Ball { B_INIT, B_FLASH, B_MOVE };
 int Tick_Game_Manager(int);
 int Tick_Start_Reset(int);
 int Tick_Player_Toggle(int);
@@ -125,7 +128,7 @@ int Tick_Game_Manager(int state) {
     switch (state) { // Transitions
         case GM_INIT:
             if (gameStatus) {
-                state = GM_PLAY;
+                state = GM_PLAY;    
             }
             break;
         case GM_PLAY:
@@ -292,15 +295,37 @@ int Tick_Player2(int state) {
 }
 
 int Tick_Ball(int state) {
+    static unsigned char i;
     switch (state) { // Transitions
         case B_INIT:
+            // ball to default settings
+            ballVec[0] = 2;
+            ballVec[1] = 2;
+            ballLoc[0] = 62;
+            ballLoc[1] = 62 + BALL_DIAMETER;
+            ballLoc[2] = 62;
+            ballLoc[3] = 62 + BALL_DIAMETER;
+            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR);
+
             if (gameStatus) {
-                state = B_PLAY;
+                state = B_FLASH;
+                i = 0;
             }
             break;
-        case B_PLAY:
+        case B_FLASH:
+            if (i > 120) {
+                state = B_MOVE;
+            }
+            break;
+        case B_MOVE:
             if (!gameStatus) {
                 state = B_INIT;
+                displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
+                break;
+            }
+            if (pointScored) {
+                state = B_FLASH;
+                i = 0;
                 displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
             }
             break;
@@ -310,14 +335,18 @@ int Tick_Ball(int state) {
     }
     switch (state) { // Actions
         case B_INIT:
-            ballLoc[0] = 62;
-            ballLoc[1] = 62 + BALL_DIAMETER;
-            ballLoc[2] = 62;
-            ballLoc[3] = 62 + BALL_DIAMETER;
-            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR);
             break;
-        case B_PLAY:
-            checkCollision(); // TODO: check the return value and the game responds accordingly
+        case B_FLASH:
+            if ((i / 20) % 2 == 0) {
+               displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR); 
+            }
+            else {
+                displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);  
+            }
+            i++;
+            break;
+        case B_MOVE:
+            pointScored = checkCollision();
             moveBall();            
             break;
         default:
@@ -432,8 +461,8 @@ void autonomousPlayer2(void) {
         player2Loc[3] -= 1;
     }
     else if (ballLoc[3] >= player2Loc[3]) {
-        player2Loc[2] += 1;
-        player2Loc[3] += 1;
+        player2Loc[2] += 2;
+        player2Loc[3] += 2;
     }
     displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], OBJECT_COLOR); // display new paddle
 }
