@@ -41,13 +41,13 @@ typedef struct _task{
 
 // Task periods and GCD
 const unsigned long GCD_PERIOD = 25;
-const unsigned long GAME_MANAGER_PERIOD = 100;
+const unsigned long GAME_MANAGER_PERIOD = 500;
 const unsigned long START_RESET_PERIOD = 200;
 const unsigned long PLAYER_TOGGLE_BUTTON_PERIOD = 200;
 const unsigned long PLAYER1_PERIOD = 25;
 const unsigned long PLAYER2_PERIOD = 25;
 const unsigned long BALL_PERIOD = 25;
-const unsigned long INFO_DISPLAY_PERIOD = 500;
+const unsigned long INFO_DISPLAY_PERIOD = 1000;
 const unsigned long MUSIC_BUZZER_PERIOD = 200;
 
 task tasks[NUM_TASKS]; // task array
@@ -419,6 +419,45 @@ int Tick_Ball(int state) {
 }
 
 int Tick_Info_Display(int state) {
+    lcd_clear();
+
+    // display winner
+    lcd_goto_xy(0, 4);
+    if(winner == 1) { lcd_write_str("P1 WINS!"); }
+    else if (winner == 2) { lcd_write_str("P2 WINS!"); }
+    else {}
+
+    // display player mode
+    lcd_goto_xy(1, 7);
+    lcd_write_character(numPlayers + 48);
+    lcd_write_character('P');
+
+    // display P2 score
+    lcd_goto_xy(1, 0);
+    if (player1Score < 10) {
+        lcd_write_character('0');
+        lcd_goto_xy(1, 1);
+        lcd_write_character(player2Score + 0x30);
+    }
+    else {
+        lcd_write_character(player2Score / 10 + 0x30);
+        lcd_goto_xy(1, 1);
+        lcd_write_character(player2Score % 10 + 0x30);
+    }
+
+    // display P1 score
+    lcd_goto_xy(1, 14);
+    if (player1Score < 10) {
+        lcd_write_character('0');
+        lcd_goto_xy(1, 15);
+        lcd_write_character(player1Score + 0x30);
+    }
+    else {
+        lcd_write_character(player1Score / 10 + 0x30);
+        lcd_goto_xy(1, 15);
+        lcd_write_character(player1Score % 10 + 0x30);
+    }
+
     return 0;
 }
 
