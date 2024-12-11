@@ -1,10 +1,11 @@
 #include "helper.h"
 #include "periph.h"
 #include "ST7735_LCD.h"
+#include "LCD1602.h"
 #include "SPI_AVR.h"
 #include "timerISR.h"
 
-#define NUM_TASKS 6
+#define NUM_TASKS 8
 
 // Game constants
 const char PADDLE_WIDTH = 26;
@@ -12,17 +13,23 @@ const char PADDLE_DEPTH = 5;
 const char BALL_DIAMETER = 4;
 const short BACKGROUND_COLOR = (0x0000);
 const short OBJECT_COLOR = (0xFFFF);
+const short GOLD_COLOR = (0xaae0);
+const short BROWN_COLOR = (0x1860);
+const char POINTS_TO_WIN = 3;
 
 // Shared variables
 unsigned char player1Loc[4] = {10, 10 + PADDLE_DEPTH, 52, 52 + PADDLE_WIDTH}; // in order: xs, xe, ys, ye
 unsigned char player2Loc[4] = {119 - PADDLE_DEPTH, 119, 52, 52 + PADDLE_WIDTH}; 
 unsigned char ballLoc[4] = {62, 62 + BALL_DIAMETER, 62, 62 + BALL_DIAMETER}; // in order: xs, xe, ys, ye
 signed char ballVec[2] = {2,2}; // in order:x, y
-unsigned char gameStatus = 0; // 1 for game in progress, 0 otherwise
+unsigned char gameStatus = 0;
+unsigned char startReset = 0;
 unsigned char numPlayers = 2; // can be 1 or 2 players
+unsigned char newRally = 0; // tells ball task to reset ball to middle
 unsigned char pointScored = 0; // 1 for point scored by player 1, 2 for point scored by player 2
 unsigned char player1Score = 0;
-unsigned char plyaer2Score = 0;
+unsigned char player2Score = 0;
+unsigned char winner = 0; // 1 if player 1 wins, 2 if player 2 wins
 
 // Task struct for concurrent synchSMs implmentations
 typedef struct _task{
@@ -35,27 +42,33 @@ typedef struct _task{
 // Task periods and GCD
 const unsigned long GCD_PERIOD = 25;
 const unsigned long GAME_MANAGER_PERIOD = 100;
-const unsigned long START_RESET_BUTTON_PERIOD = 200;
+const unsigned long START_RESET_PERIOD = 200;
 const unsigned long PLAYER_TOGGLE_BUTTON_PERIOD = 200;
 const unsigned long PLAYER1_PERIOD = 25;
 const unsigned long PLAYER2_PERIOD = 25;
 const unsigned long BALL_PERIOD = 25;
+const unsigned long INFO_DISPLAY_PERIOD = 500;
+const unsigned long MUSIC_BUZZER_PERIOD = 200;
 
 task tasks[NUM_TASKS]; // task array
 
 // Task functions and states declaration
-enum GameManager { GM_INIT, GM_PLAY, GM_POINT };
-enum StartResetButton { SR_RESET, SR_PRESS_START, SR_START, SR_PRESS_RESET };
+enum GameManager { GM_INIT, GM_PLAY, GM_WIN };
+enum StartReset { SR_RESET, SR_PRESS_START, SR_START, SR_PRESS_RESET };
 enum PlayerToggleButton { PT_TWO, PT_PRESS_ONE, PT_ONE, PT_PRESS_TWO };
 enum Player1 { P1_INIT, P1_MOVE };
 enum Player2 { P2_INIT, P2_MOVE, P2_AUTO };
 enum Ball { B_INIT, B_FLASH, B_MOVE };
+enum InfoDisplay { ID_INIT };
+enum MusicBuzzer { MB_INIT };
 int Tick_Game_Manager(int);
 int Tick_Start_Reset(int);
 int Tick_Player_Toggle(int);
 int Tick_Player1(int);
 int Tick_Player2(int);
 int Tick_Ball(int);
+int Tick_Info_Display(int);
+int Tick_Music_Buzzer(int);
 
 // Helper function declaration
 int checkCollision(void);
@@ -82,6 +95,7 @@ int main() {
     
     SPI_INIT();
     ST7735_init();
+    lcd_init();
     ADC_init();
     unsigned char i = 0;
 
@@ -92,7 +106,7 @@ int main() {
     tasks[i].TickFct = &Tick_Game_Manager;
     i++;
     tasks[i].state = SR_RESET;
-    tasks[i].period = START_RESET_BUTTON_PERIOD;
+    tasks[i].period = START_RESET_PERIOD;
     tasks[i].elapsedTime = tasks[i].period;
     tasks[i].TickFct = &Tick_Start_Reset;
     i++;
@@ -115,6 +129,16 @@ int main() {
     tasks[i].period = BALL_PERIOD;
     tasks[i].elapsedTime = tasks[i].period;
     tasks[i].TickFct = &Tick_Ball;
+    i++;
+    tasks[i].state = ID_INIT;
+    tasks[i].period = INFO_DISPLAY_PERIOD;
+    tasks[i].elapsedTime = tasks[i].period;
+    tasks[i].TickFct = &Tick_Info_Display;
+    i++;
+    tasks[i].state = MB_INIT;
+    tasks[i].period = MUSIC_BUZZER_PERIOD;
+    tasks[i].elapsedTime = tasks[i].period;
+    tasks[i].TickFct = &Tick_Music_Buzzer;
 
     TimerSet(GCD_PERIOD);
     TimerOn();
@@ -127,13 +151,23 @@ int main() {
 int Tick_Game_Manager(int state) {
     switch (state) { // Transitions
         case GM_INIT:
-            if (gameStatus) {
+            if (startReset) {
+                startReset = 0;
+                gameStatus = 1;
                 state = GM_PLAY;    
             }
             break;
         case GM_PLAY:
+            if (winner) {
+                state = GM_WIN;
+                gameStatus = 0;
+            }
             break;
-        case GM_POINT:
+        case GM_WIN:
+            if (startReset) {
+                startReset = 0;
+                state = GM_INIT;    
+            }
             break;
         default:
             state = GM_INIT;
@@ -141,7 +175,33 @@ int Tick_Game_Manager(int state) {
     }
     switch (state) { // Actions
         case GM_INIT:
-            displayBlock(0, 129, 0, 129, BACKGROUND_COLOR); // initialize empty board
+            // initialize empty board and scores
+            displayBlock(0, 129, 0, 129, BACKGROUND_COLOR);
+            player1Score = 0;
+            player1Score = 0;
+            winner = 0;
+            break;
+        case GM_PLAY:
+            // track scores and detect when there is a winner
+             if (pointScored == 1) {
+                pointScored = 0;
+                player1Score++;
+                if (player1Score >= POINTS_TO_WIN) { winner = 1; }
+            } else if (pointScored == 2) {
+                pointScored = 0;
+                player2Score++;
+                if (player2Score >= POINTS_TO_WIN) { winner = 2; }
+            } else {}
+            break;
+        case GM_WIN:
+            // display a gold medal on the winner's side and brown square on the loser's side
+            if (winner == 1) {
+                displayBlock(80, 110, 50, 80, BROWN_COLOR);
+                displayBlock(20, 50, 50, 80, GOLD_COLOR);
+            } else if (winner == 2) {
+                displayBlock(80, 110, 50, 80, GOLD_COLOR);
+                displayBlock(20, 50, 50, 80, BROWN_COLOR);
+            } else {}
             break;
         default:
             break;
@@ -159,7 +219,7 @@ int Tick_Start_Reset(int state) {
         case SR_PRESS_START:
             if (!GetBit(PINC, 3)) {
                 state = SR_START;
-                gameStatus = 1;
+                startReset = 1;
             }
             break;
         case SR_START:
@@ -170,7 +230,7 @@ int Tick_Start_Reset(int state) {
         case SR_PRESS_RESET:
             if (!GetBit(PINC, 3)) {
                 state = SR_RESET;
-                gameStatus = 0;
+                startReset = 1;
             }
             break;
         default:
@@ -221,6 +281,7 @@ int Tick_Player1(int state) {
         case P1_MOVE:
             if (!gameStatus) {
                 state = P1_INIT;
+                displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear paddle
             }
             break;
         default:
@@ -229,7 +290,7 @@ int Tick_Player1(int state) {
     }
     switch (state) { // Actions
         case P1_INIT:
-            displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear paddle
+            // displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear paddle
             break;
         case P1_MOVE:
             displayBlock(player1Loc[0], player1Loc[1], player1Loc[2], player1Loc[3], BACKGROUND_COLOR); // clear previous paddle
@@ -305,7 +366,6 @@ int Tick_Ball(int state) {
             ballLoc[1] = 62 + BALL_DIAMETER;
             ballLoc[2] = 62;
             ballLoc[3] = 62 + BALL_DIAMETER;
-            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR);
 
             if (gameStatus) {
                 state = B_FLASH;
@@ -323,8 +383,9 @@ int Tick_Ball(int state) {
                 displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
                 break;
             }
-            if (pointScored) {
+            if (newRally) {
                 state = B_FLASH;
+                newRally = 0;
                 i = 0;
                 displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
             }
@@ -335,6 +396,7 @@ int Tick_Ball(int state) {
     }
     switch (state) { // Actions
         case B_INIT:
+            displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], OBJECT_COLOR);
             break;
         case B_FLASH:
             if ((i / 20) % 2 == 0) {
@@ -347,12 +409,21 @@ int Tick_Ball(int state) {
             break;
         case B_MOVE:
             pointScored = checkCollision();
+            newRally = pointScored;
             moveBall();            
             break;
         default:
             break;
     }   
     return state;
+}
+
+int Tick_Info_Display(int state) {
+    return 0;
+}
+
+int Tick_Music_Buzzer(int state) {
+    return 0;
 }
 
 // Helper functions
@@ -385,6 +456,10 @@ void moveBall(void) {
 /* Checks whether the ball has collided with the walls or paddles, and changes it's vector accordingly.
    Returns 1 when player 1 scores, 2 when player 2 scores, and 0 when nobody scores. */
 int checkCollision(void) {
+    // TODO: fix error where angle is not changed by hitting side of paddle
+    // TODO: fix bug where passes through the extreme ends of paddle
+    // TODO: overall the if-elses to find balls relation to the paddles are wrong
+    
     // side walls
     if (ballLoc[2] <= 2 || ballLoc[3] >= 127) {
         ballVec[1] *= -1;
@@ -431,8 +506,8 @@ int checkCollision(void) {
     }
 
     // behind paddle 1
-    if (ballLoc[0] <= 4) {
-        displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
+    if (ballLoc[0] <= 6) {
+        displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous ball
         ballLoc[0] = 62;
         ballLoc[1] = 62 + BALL_DIAMETER;
         ballLoc[2] = 62;
@@ -441,7 +516,7 @@ int checkCollision(void) {
     }
 
     // behind paddle 2
-    if (ballLoc[1] >= 125) {
+    if (ballLoc[1] >= 123) {
         displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR); // clear previous paddle
         ballLoc[0] = 62;
         ballLoc[1] = 62 + BALL_DIAMETER;
