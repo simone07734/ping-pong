@@ -5,7 +5,7 @@
 #include "SPI_AVR.h"
 #include "timerISR.h"
 
-#define NUM_TASKS 8
+#define NUM_TASKS 7
 
 // Game constants
 const char PADDLE_WIDTH = 26;
@@ -48,7 +48,6 @@ const unsigned long PLAYER1_PERIOD = 25;
 const unsigned long PLAYER2_PERIOD = 25;
 const unsigned long BALL_PERIOD = 25;
 const unsigned long INFO_DISPLAY_PERIOD = 1000;
-const unsigned long MUSIC_BUZZER_PERIOD = 200;
 
 task tasks[NUM_TASKS]; // task array
 
@@ -60,7 +59,6 @@ enum Player1 { P1_INIT, P1_MOVE };
 enum Player2 { P2_INIT, P2_MOVE, P2_AUTO };
 enum Ball { B_INIT, B_FLASH, B_MOVE };
 enum InfoDisplay { ID_INIT };
-enum MusicBuzzer { MB_INIT };
 int Tick_Game_Manager(int);
 int Tick_Start_Reset(int);
 int Tick_Player_Toggle(int);
@@ -68,7 +66,6 @@ int Tick_Player1(int);
 int Tick_Player2(int);
 int Tick_Ball(int);
 int Tick_Info_Display(int);
-int Tick_Music_Buzzer(int);
 
 // Helper function declaration
 int checkCollision(void);
@@ -92,11 +89,12 @@ int main() {
     PORTC = 0xff;
     DDRD = 0xff;
     PORTD = 0x00;
-    
+
     SPI_INIT();
     ST7735_init();
     lcd_init();
     ADC_init();
+
     unsigned char i = 0;
 
     // initialize tasks
@@ -135,10 +133,6 @@ int main() {
     tasks[i].elapsedTime = tasks[i].period;
     tasks[i].TickFct = &Tick_Info_Display;
     i++;
-    tasks[i].state = MB_INIT;
-    tasks[i].period = MUSIC_BUZZER_PERIOD;
-    tasks[i].elapsedTime = tasks[i].period;
-    tasks[i].TickFct = &Tick_Music_Buzzer;
 
     TimerSet(GCD_PERIOD);
     TimerOn();
@@ -158,6 +152,11 @@ int Tick_Game_Manager(int state) {
             }
             break;
         case GM_PLAY:
+            if (startReset) {
+                startReset = 0;
+                gameStatus = 0;
+                state = GM_INIT;
+            }
             if (winner) {
                 state = GM_WIN;
                 gameStatus = 0;
@@ -178,7 +177,7 @@ int Tick_Game_Manager(int state) {
             // initialize empty board and scores
             displayBlock(0, 129, 0, 129, BACKGROUND_COLOR);
             player1Score = 0;
-            player1Score = 0;
+            player2Score = 0;
             winner = 0;
             break;
         case GM_PLAY:
@@ -359,14 +358,6 @@ int Tick_Ball(int state) {
     static unsigned char i;
     switch (state) { // Transitions
         case B_INIT:
-            // ball to default settings
-            ballVec[0] = 2;
-            ballVec[1] = 2;
-            ballLoc[0] = 62;
-            ballLoc[1] = 62 + BALL_DIAMETER;
-            ballLoc[2] = 62;
-            ballLoc[3] = 62 + BALL_DIAMETER;
-
             if (gameStatus) {
                 state = B_FLASH;
                 i = 0;
@@ -380,6 +371,13 @@ int Tick_Ball(int state) {
         case B_MOVE:
             if (!gameStatus) {
                 state = B_INIT;
+                // ball to default settings
+                ballVec[0] = 2;
+                ballVec[1] = 2;
+                ballLoc[0] = 62;
+                ballLoc[1] = 62 + BALL_DIAMETER;
+                ballLoc[2] = 62;
+                ballLoc[3] = 62 + BALL_DIAMETER;
                 displayBlock(ballLoc[0], ballLoc[1], ballLoc[2], ballLoc[3], BACKGROUND_COLOR);
                 break;
             }
@@ -461,10 +459,6 @@ int Tick_Info_Display(int state) {
     return 0;
 }
 
-int Tick_Music_Buzzer(int state) {
-    return 0;
-}
-
 // Helper functions
 
 /* Moves the ball according to ballVec*/
@@ -495,9 +489,6 @@ void moveBall(void) {
 /* Checks whether the ball has collided with the walls or paddles, and changes it's vector accordingly.
    Returns 1 when player 1 scores, 2 when player 2 scores, and 0 when nobody scores. */
 int checkCollision(void) {
-    // TODO: fix error where angle is not changed by hitting side of paddle
-    // TODO: fix bug where passes through the extreme ends of paddle
-    // TODO: overall the if-elses to find balls relation to the paddles are wrong
     
     // side walls
     if (ballLoc[2] <= 2 || ballLoc[3] >= 127) {
@@ -520,8 +511,8 @@ int checkCollision(void) {
             ballVec[1] += 1; 
         }
         else {}
-        if (ballVec[1] > 4) { ballVec[1] = 4; }
-        if (ballVec[1] < 1) { ballVec[1] = 1; }
+        if (ballVec[1] > 3) { ballVec[1] = 3; }
+        if (ballVec[1] < -3) { ballVec[1] = -3; }
     }
 
     // paddle 2
@@ -540,8 +531,8 @@ int checkCollision(void) {
             ballVec[1] += 1; 
         }
         else {}
-        if (ballVec[1] > 4) { ballVec[1] = 4; }
-        if (ballVec[1] < 1) { ballVec[1] = 1; }
+        if (ballVec[1] > 3) { ballVec[1] = 3; }
+        if (ballVec[1] < -3) { ballVec[1] = -3; }
     }
 
     // behind paddle 1
@@ -571,8 +562,8 @@ int checkCollision(void) {
 void autonomousPlayer2(void) {
     displayBlock(player2Loc[0], player2Loc[1], player2Loc[2], player2Loc[3], BACKGROUND_COLOR);  // clear previous paddle
     if (ballLoc[2] <= player2Loc[2]) {
-        player2Loc[2] -= 1;
-        player2Loc[3] -= 1;
+        player2Loc[2] -= 2;
+        player2Loc[3] -= 2;
     }
     else if (ballLoc[3] >= player2Loc[3]) {
         player2Loc[2] += 2;

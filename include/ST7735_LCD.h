@@ -87,9 +87,3 @@ void displayBlock(unsigned char xs, unsigned char xe, unsigned char ys, unsigned
     }
     return;
 }
-
-/* TODO: displayBitmap
-Inputs: xs, xe, bitmap (using array, with first 2 vals = dimensions)
-Behavior: Takes the top left corner. Uses the first 2 array vals to pick the size
-we are drawing in. Iterate through the rest of the bitmap to draw the think
-*/
